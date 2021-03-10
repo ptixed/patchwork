@@ -13,12 +13,18 @@ namespace Patchwork
 {
     static class Program
     {
-        private static readonly IDeserializer _deserializer = new DeserializerBuilder().Build();
-        private static readonly ISerializer _serializer = new SerializerBuilder().JsonCompatible().Build();
+        private static readonly IDeserializer _deserializer = new DeserializerBuilder()
+            .WithNodeTypeResolver(new YamlBoolNodeTypeResolver())
+            .Build();
+
+        private static readonly ISerializer _serializer = new SerializerBuilder()
+            .WithEventEmitter(next => new YamlBoolEventEmitter(next))
+            .JsonCompatible()
+            .Build();
 
         private static readonly JsonMergeSettings _merger = new JsonMergeSettings
         {
-            MergeArrayHandling = MergeArrayHandling.Merge
+            MergeArrayHandling = MergeArrayHandling.Concat
         };
 
         public static bool Matches(this JToken l, JToken r)
@@ -27,9 +33,14 @@ namespace Patchwork
                 return false;
             switch (l)
             {
-                case JObject jo:
+                case JObject jol:
                     foreach (var prop in r as JObject)
-                        if (!jo[prop.Key].Matches(prop.Value))
+                        if (!jol.TryGetValue(prop.Key, out var token) || !token.Matches(prop.Value))
+                            return false;
+                    return true;
+                case JArray jal:
+                    foreach (var item in r as JArray)
+                        if (!jal.Any(x => x.Matches(item)))
                             return false;
                     return true;
                 case JValue jvl: 
@@ -54,7 +65,7 @@ namespace Patchwork
                     var json = _serializer.Serialize(yaml);
                     var root = JsonConvert.DeserializeObject<JToken>(json);
                     
-                    if (root["kind"].ToString() != PatchworkModel.PatchworkKind)
+                    if (root[nameof(PatchworkModel.Kind).ToLower()]?.ToString() != PatchworkModel.PatchworkKind)
                     {
                         yield return root;
                         continue;
@@ -63,12 +74,13 @@ namespace Patchwork
                     var patchwork = root.ToObject<PatchworkModel>();
                     var directory = Path.GetDirectoryName(path);
                     var filepaths = patchwork.Includes.Select(x => Path.Combine(directory, x)).ToList();
-                    foreach (var file in filepaths.SelectMany(Process))
+                    foreach (var obj in filepaths.SelectMany(Process))
                     {
                         foreach (var patch in patchwork.Patches)
-                            foreach (JObject branch in file.SelectTokens(patch.Path ?? ".").Where(x => x.Matches(patch.Match)))
-                                branch.Merge(patch.Patch, _merger);
-                        yield return file;
+                            if (obj.Matches(patch.Match))
+                                foreach (JContainer node in obj.SelectTokens(patch.PatchPath ?? "$", true))
+                                    node.Merge(patch.Patch, _merger);
+                        yield return obj;
                     }
                 }
             }
@@ -76,22 +88,53 @@ namespace Patchwork
 
         private static void Main(string[] args)
         {
-            // args = new[] { "../../../test/provider/root.yml" };
-
-            var files = Process(args[0]).ToArray();
-
-            var serializer = new SerializerBuilder().Build();
-            for (var i = 0; i < files.Length; ++i)
+            if (args.Length == 0)
             {
-                var json = JsonConvert.SerializeObject(files[i]);
+                // args = new[] { "../../../tests/sublevel/patchwork.yml", "ingress/monitoring" };
+                Console.WriteLine("usage: ./patchwork.exe path/to/patchwork/file.yml [object id to render]...");
+                Environment.Exit(1);
+            }
+
+            var objects = Process(args[0]).ToArray();
+            if (args.Length > 1)
+                objects = args.Skip(1)
+                    .Select(id =>
+                    {
+                        var parts = id.ToLower().Split('/');
+                        if (parts.Length != 2 && parts.Length != 3)
+                        {
+                            Console.WriteLine("ids should have format kind/name or kind/namespace/name");
+                            Environment.Exit(1);
+                        }
+                        return objects.Single(x =>
+                        {
+                            var meta = x["metadata"];
+                            var kind = x["kind"].ToString().ToLower();
+                            var name = meta["name"].ToString().ToLower();
+                            var ns = (meta["namespace"] ?? "default").ToString().ToLower();
+                            return (parts.Length == 2 || parts[1] == ns)
+                                && kind == parts.First() 
+                                && name == parts.Last();
+                        });
+                    })
+                    .ToArray();
+
+            var serializer = new SerializerBuilder()
+                .WithEventEmitter(next => new YamlBoolEventEmitter(next))
+                .Build();
+
+            for (var i = 0; i < objects.Length; ++i)
+            {
+                var json = JsonConvert.SerializeObject(objects[i]);
                 var root = _deserializer.Deserialize<object>(json);
 
                 Console.Write(serializer.Serialize(root));
-                Console.Write('\n');
+                Console.WriteLine();
 
-                if (i < files.Length - 1)
-                    Console.WriteLine("---\n");
+                if (i < objects.Length - 1)
+                    Console.WriteLine("---");
             }
         }
+
     }
 }

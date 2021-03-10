@@ -1,0 +1,13 @@
+﻿kind: Patchwork
+
+includes: 
+- ingress.yml
+
+patches: 
+- match:
+    kind: Ingress
+  patchPath: spec.tls
+  patch:
+  - secretName: tls-test
+    hosts:
+    - test.com

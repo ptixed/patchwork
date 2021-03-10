@@ -1,0 +1,44 @@
+﻿kind: Patchwork
+
+includes: 
+- ../patchwork.yml
+
+patches: 
+- match:
+   kind: Ingress
+   metadata:
+     annotations:
+       kubernetes.io/ingress.class: nginx
+  patch:
+   metadata:
+     annotations:
+       nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+- match:
+    kind: Ingress
+  patchPath: spec.rules[*].http.paths[*]
+  patch:
+    backend:
+      servicePort: 81
+
+- match:
+    kind: Ingress
+    metadata:
+      namespace: prod-.*
+  patchPath: spec.rules[*].http.paths
+  patch:
+  - path: /dashboard/(.*)
+    backend:
+      serviceName: dashboard
+      servicePort: 80
+
+- match:
+    spec:
+      rules:
+      - http:
+          paths:
+          - path: /dashboard/(.*)
+  patchPath: spec.rules[*].http.paths[?(@.path=='/dashboard/(.*)')]
+  patch:
+    backend:
+      servicePort: 82
