@@ -6,8 +6,9 @@ includes:
 patches: 
 - match:
     kind: Ingress
-  patchPath: spec.tls
+  patchPath: spec
   patch:
-  - secretName: tls-test
-    hosts:
-    - test.com
+    tls:
+    - secretName: tls-test
+      hosts:
+      - test.com

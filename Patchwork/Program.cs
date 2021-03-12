@@ -27,6 +27,8 @@ namespace Patchwork
             MergeArrayHandling = MergeArrayHandling.Concat
         };
 
+        private static string FixPath(string path) => Path.GetRelativePath(Environment.CurrentDirectory, Path.GetFullPath(path));
+
         public static bool Matches(this JToken l, JToken r)
         {
             if (l?.GetType() != r?.GetType())
@@ -52,7 +54,7 @@ namespace Patchwork
             throw new NotSupportedException();
         }
 
-        private static IEnumerable<JToken> Process(string path)
+        private static IEnumerable<(string objpath, JToken obj)> Process(string path)
         {
             using (var stream = File.OpenRead(path))
             using (var reader = new StreamReader(stream))
@@ -67,57 +69,41 @@ namespace Patchwork
                     
                     if (root[nameof(PatchworkModel.Kind).ToLower()]?.ToString() != PatchworkModel.PatchworkKind)
                     {
-                        yield return root;
+                        yield return (FixPath(path), root);
                         continue;
                     }
 
                     var patchwork = root.ToObject<PatchworkModel>();
                     var directory = Path.GetDirectoryName(path);
                     var filepaths = patchwork.Includes.Select(x => Path.Combine(directory, x)).ToList();
-                    foreach (var obj in filepaths.SelectMany(Process))
+                    foreach (var (objpath, obj) in filepaths.SelectMany(Process))
                     {
                         foreach (var patch in patchwork.Patches)
                             if (obj.Matches(patch.Match))
                                 foreach (JContainer node in obj.SelectTokens(patch.PatchPath ?? "$", true))
                                     node.Merge(patch.Patch, _merger);
-                        yield return obj;
+                        yield return (objpath, obj);
                     }
                 }
             }
         }
 
-        private static void Main(string[] args)
+        private static int Main(string[] args)
         {
+            //args = new[] { "../../../tests/sublevel/patchwork.yml", "../../../tests/ingress.yml" };
+
             if (args.Length == 0)
             {
-                // args = new[] { "../../../tests/sublevel/patchwork.yml", "ingress/monitoring" };
-                Console.WriteLine("usage: ./patchwork.exe path/to/patchwork/file.yml [object id to render]...");
-                Environment.Exit(1);
+                Console.WriteLine("usage: ./patchwork.exe path/to/patchwork/file.yml [path to render]...");
+                return 1;
             }
 
             var objects = Process(args[0]).ToArray();
             if (args.Length > 1)
-                objects = args.Skip(1)
-                    .Select(id =>
-                    {
-                        var parts = id.ToLower().Split('/');
-                        if (parts.Length != 2 && parts.Length != 3)
-                        {
-                            Console.WriteLine("ids should have format kind/name or kind/namespace/name");
-                            Environment.Exit(1);
-                        }
-                        return objects.Single(x =>
-                        {
-                            var meta = x["metadata"];
-                            var kind = x["kind"].ToString().ToLower();
-                            var name = meta["name"].ToString().ToLower();
-                            var ns = (meta["namespace"] ?? "default").ToString().ToLower();
-                            return (parts.Length == 2 || parts[1] == ns)
-                                && kind == parts.First() 
-                                && name == parts.Last();
-                        });
-                    })
-                    .ToArray();
+            {
+                var paths = args.Skip(1).Select(FixPath).ToArray();
+                objects = objects.Where(x => paths.Contains(x.objpath)).ToArray();
+            }
 
             var serializer = new SerializerBuilder()
                 .WithEventEmitter(next => new YamlBoolEventEmitter(next))
@@ -125,16 +111,18 @@ namespace Patchwork
 
             for (var i = 0; i < objects.Length; ++i)
             {
-                var json = JsonConvert.SerializeObject(objects[i]);
+                var json = JsonConvert.SerializeObject(objects[i].obj);
                 var root = _deserializer.Deserialize<object>(json);
 
+                Console.WriteLine($"# {objects[i].objpath}");
                 Console.Write(serializer.Serialize(root));
                 Console.WriteLine();
 
                 if (i < objects.Length - 1)
                     Console.WriteLine("---");
             }
-        }
 
+            return 0;
+        }
     }
 }
