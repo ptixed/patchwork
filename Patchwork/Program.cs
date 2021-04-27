@@ -75,7 +75,7 @@ namespace Patchwork
 
                     var patchwork = root.ToObject<PatchworkModel>();
                     var directory = Path.GetDirectoryName(path);
-                    var filepaths = patchwork.Includes.Select(x => Path.Combine(directory, x)).ToList();
+                    var filepaths = patchwork.Includes.SelectMany(x => Directory.EnumerateFiles(directory, x)).ToList();
                     foreach (var (objpath, obj) in filepaths.SelectMany(Process))
                     {
                         foreach (var patch in patchwork.Patches)
