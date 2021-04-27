@@ -12,8 +12,14 @@ namespace Patchwork
 
         public override void Emit(ScalarEventInfo evt, IEmitter emitter)
         {
-            if (evt.Source.Type == typeof(string) && Constants.YamlBoolRegex.IsMatch(evt.Source.Value?.ToString()))
-                evt.Style = ScalarStyle.DoubleQuoted;
+            if (evt.Source.Type == typeof(string))
+            {
+                if (Constants.YamlBoolRegex.IsMatch(evt.Source.Value?.ToString()))
+                    evt.Style = ScalarStyle.DoubleQuoted;
+                else if (evt.Source.Value?.ToString().Contains('\n') == true)
+                    evt.Style = ScalarStyle.Literal;
+            }
+
             nextEmitter.Emit(evt, emitter);
         }
     }
