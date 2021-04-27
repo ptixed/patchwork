@@ -54,7 +54,7 @@ namespace Patchwork
             throw new NotSupportedException();
         }
 
-        private static IEnumerable<(string objpath, JToken obj)> Process(string path)
+        private static IEnumerable<KubernetesObject> Process(string path)
         {
             using (var stream = File.OpenRead(path))
             using (var reader = new StreamReader(stream))
@@ -67,22 +67,22 @@ namespace Patchwork
                     var json = _serializer.Serialize(yaml);
                     var root = JsonConvert.DeserializeObject<JToken>(json);
                     
-                    if (root[nameof(PatchworkModel.Kind).ToLower()]?.ToString() != PatchworkModel.PatchworkKind)
+                    if (root["kind"].ToString() != PatchworkModel.PatchworkKind)
                     {
-                        yield return (FixPath(path), root);
+                        yield return new KubernetesObject(root, FixPath(path));
                         continue;
                     }
 
                     var patchwork = root.ToObject<PatchworkModel>();
                     var directory = Path.GetDirectoryName(path);
                     var filepaths = patchwork.Includes.SelectMany(x => Directory.EnumerateFiles(directory, x)).ToList();
-                    foreach (var (objpath, obj) in filepaths.SelectMany(Process))
+                    foreach (var obj in filepaths.SelectMany(Process))
                     {
                         foreach (var patch in patchwork.Patches)
-                            if (obj.Matches(patch.Match))
-                                foreach (JContainer node in obj.SelectTokens(patch.PatchPath ?? "$", true))
+                            if (obj.Object.Matches(patch.Match))
+                                foreach (JContainer node in obj.Object.SelectTokens(patch.PatchPath ?? "$", true))
                                     node.Merge(patch.Patch, _merger);
-                        yield return (objpath, obj);
+                        yield return obj;
                     }
                 }
             }
@@ -98,11 +98,11 @@ namespace Patchwork
                 return 1;
             }
 
-            var objects = Process(args[0]).ToArray();
+            var objects = Process(args[0]).OrderBy(x => x.Priority).ToArray();
             if (args.Length > 1)
             {
                 var paths = args.Skip(1).Select(FixPath).ToArray();
-                objects = objects.Where(x => paths.Contains(x.objpath)).ToArray();
+                objects = objects.Where(x => paths.Contains(x.FilePath)).ToArray();
             }
 
             var serializer = new SerializerBuilder()
@@ -111,10 +111,10 @@ namespace Patchwork
 
             for (var i = 0; i < objects.Length; ++i)
             {
-                var json = JsonConvert.SerializeObject(objects[i].obj);
+                var json = JsonConvert.SerializeObject(objects[i].Object);
                 var root = _deserializer.Deserialize<object>(json);
 
-                Console.WriteLine($"# {objects[i].objpath}");
+                Console.WriteLine($"# {objects[i].FilePath}");
                 Console.Write(serializer.Serialize(root));
                 Console.WriteLine();
 
