@@ -13,6 +13,7 @@ patches:
    metadata:
      annotations:
        nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+       some: "+123"
 
 - match:
     kind: Ingress

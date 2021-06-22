@@ -14,7 +14,10 @@ namespace Patchwork
         {
             if (evt.Source.Type == typeof(string))
             {
-                if (Constants.YamlBoolRegex.IsMatch(evt.Source.Value?.ToString()))
+                var value = evt.Source.Value?.ToString();
+                if (Constants.YamlBoolRegex.IsMatch(value))
+                    evt.Style = ScalarStyle.DoubleQuoted;
+                else if (double.TryParse(value, out double _))
                     evt.Style = ScalarStyle.DoubleQuoted;
                 else if (evt.Source.Value?.ToString().Contains('\n') == true)
                     evt.Style = ScalarStyle.Literal;
