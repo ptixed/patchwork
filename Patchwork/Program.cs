@@ -90,7 +90,7 @@ namespace Patchwork
 
         private static int Main(string[] args)
         {
-            //args = new[] { "../../../tests/sublevel/patchwork.yml", "../../../tests/ingress.yml" };
+            // args = new[] { "../../../tests/sublevel/patchwork.yml", "../../../tests/ingress.yml" };
 
             if (args.Length == 0)
             {

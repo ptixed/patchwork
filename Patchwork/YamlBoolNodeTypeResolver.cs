@@ -9,10 +9,18 @@ namespace Patchwork
     {
         public bool Resolve(NodeEvent evt, ref Type type)
         {
-            if (evt is Scalar s && s.Style == ScalarStyle.Plain && Constants.YamlBoolRegex.IsMatch(s.Value))
+            if (evt is Scalar s && s.Style == ScalarStyle.Plain)
             {
-                type = typeof(bool);
-                return true;
+                if (Constants.YamlBoolRegex.IsMatch(s.Value))
+                {
+                    type = typeof(bool);
+                    return true;
+                }
+                else if (double.TryParse(s.Value, out double _))
+                {
+                    type = typeof(double);
+                    return true;
+                }
             }
             return false;
         }
