@@ -54,7 +54,7 @@ namespace Patchwork
             throw new NotSupportedException();
         }
 
-        private static IEnumerable<KubernetesObject> Process(string path)
+        private static IEnumerable<KubernetesObject> ProcessPatches(string path)
         {
             using (var stream = File.OpenRead(path))
             using (var reader = new StreamReader(stream))
@@ -76,16 +76,37 @@ namespace Patchwork
                     var patchwork = root.ToObject<PatchworkModel>();
                     var directory = Path.GetDirectoryName(path);
                     var filepaths = patchwork.Includes.SelectMany(x => Directory.EnumerateFiles(directory, x)).ToList();
-                    foreach (var obj in filepaths.SelectMany(Process))
+                    foreach (var obj in filepaths.SelectMany(ProcessPatches))
                     {
                         foreach (var patch in patchwork.Patches)
                             if (obj.Object.Matches(patch.Match))
                                 foreach (JContainer node in obj.Object.SelectTokens(patch.PatchPath ?? "$", true))
                                     node.Merge(patch.Patch, _merger);
+                        ProcessImageVersions(obj.Object, patchwork.Images);
                         yield return obj;
                     }
                 }
             }
+        }
+
+        private static void ProcessImageVersions(JToken obj, Dictionary<string, string> versions)
+        {
+            if (obj is JArray ja)
+                foreach (var token in ja)
+                    ProcessImageVersions(token, versions);
+            else if (obj is IEnumerable<KeyValuePair<string, JToken>> dict)
+                foreach(var token in dict.ToList())
+                {
+                    if (token.Key != "image")
+                    {
+                        ProcessImageVersions(token.Value, versions);
+                        continue;
+                    }
+                    var image = token.Value.ToString().Split(':')[0];
+                    if (!versions.TryGetValue(image, out var version))
+                        continue;
+                    obj[token.Key] = $"{image}:{version}";
+                }
         }
 
         private static int Main(string[] args)
@@ -98,7 +119,7 @@ namespace Patchwork
                 return 1;
             }
 
-            var objects = Process(args[0]).OrderBy(x => x.Priority).ToArray();
+            var objects = ProcessPatches(args[0]).OrderBy(x => x.Priority).ToArray();
             if (args.Length > 1)
             {
                 var paths = args.Skip(1).Select(FixPath).ToArray();
